@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PicoScope Spectrum Analysis - Dual Window</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; }
+        .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+        canvas { background-color: white; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-800 text-white px-6 py-3 flex justify-between items-center z-10 shadow-md">
+        <div class="flex items-center space-x-3">
+            <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+            </svg>
+            <h1 class="text-lg font-bold tracking-tight">PicoScope Academic Viewer</h1>
+        </div>
+        <div id="fileStatus" class="text-xs font-mono text-slate-400 uppercase tracking-widest">System Ready</div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-72 bg-white border-r border-gray-200 overflow-y-auto p-4 space-y-6 flex flex-col shadow-sm text-[11px]">
+            
+            <!-- File Input -->
+            <section>
+                <h2 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b pb-1">Data Input</h2>
+                <div id="dropZone" class="border-2 border-dashed border-gray-100 rounded p-3 text-center cursor-pointer hover:border-blue-400 transition-colors">
+                    <p class="text-gray-500">Drop PicoScope .txt files</p>
+                    <input type="file" id="fileInput" class="hidden" accept=".txt" multiple>
+                    <button onclick="document.getElementById('fileInput').click()" class="mt-2 text-blue-600 font-bold hover:underline">Select Files</button>
+                </div>
+                <div id="fileList" class="mt-2 space-y-1 max-h-24 overflow-y-auto border border-gray-50 rounded"></div>
+            </section>
+
+            <!-- Plot Control -->
+            <section class="bg-slate-50 p-3 rounded border border-slate-200 shadow-inner space-y-3">
+                <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1">Display Options</h2>
+                
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span>Show Individual Traces</span>
+                        <input type="checkbox" id="showIndividual" onchange="updateCharts()" class="w-4 h-4 text-blue-600 rounded">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-blue-700">Show Harmonic Guides</span>
+                        <input type="checkbox" id="showGuides" onchange="updateCharts()" class="w-4 h-4 text-blue-600 rounded">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-2 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span>Interpolate Harmonics</span>
+                        <input type="checkbox" id="filterEnabled" onchange="processAll()" class="w-4 h-4 text-blue-600 rounded">
+                    </div>
+                    <div>
+                        <label class="text-[9px] text-gray-400 uppercase font-bold">Base Freq [Hz]</label>
+                        <input type="number" id="baseFreq" value="50" step="1" onchange="updateCharts(); processAll();" class="w-full text-xs border border-gray-300 rounded px-2 py-1 outline-none">
+                    </div>
+                    <div>
+                        <label class="text-[9px] text-gray-400 uppercase">Notch Width [Hz]</label>
+                        <input type="number" id="filterBW" value="10" step="1" onchange="processAll()" class="w-full text-xs border border-gray-300 rounded px-2 py-1 outline-none">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Window 1 Settings (Upper Log) -->
+            <section class="space-y-2 border-t pt-4">
+                <h2 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Upper Window (Log)</h2>
+                <div class="grid grid-cols-2 gap-x-2 gap-y-1">
+                    <div class="col-span-2 text-[9px] text-gray-400 uppercase font-mono tracking-tighter">X-axis [kHz]</div>
+                    <input type="number" id="xMinLog" step="0.1" onchange="applyRangeLog()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Min">
+                    <input type="number" id="xMaxLog" step="0.1" onchange="applyRangeLog()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Max">
+                    
+                    <div class="col-span-2 text-[9px] text-gray-400 uppercase font-mono tracking-tighter mt-1">Y-axis [dBV]</div>
+                    <input type="number" id="yMinLog" value="-100" step="10" onchange="applyRangeLog()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Min">
+                    <input type="number" id="yMaxLog" value="0" step="10" onchange="applyRangeLog()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Max">
+                </div>
+            </section>
+
+            <!-- Window 2 Settings (Lower Lin) -->
+            <section class="space-y-2 border-t pt-4">
+                <h2 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lower Window (Lin)</h2>
+                <div class="grid grid-cols-2 gap-x-2 gap-y-1">
+                    <div class="col-span-2 text-[9px] text-gray-400 uppercase font-mono tracking-tighter">X-axis [kHz]</div>
+                    <input type="number" id="xMinLin" step="1" onchange="applyRangeLin()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Min">
+                    <input type="number" id="xMaxLin" step="1" onchange="applyRangeLin()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Max">
+                    
+                    <div class="col-span-2 text-[9px] text-gray-400 uppercase font-mono tracking-tighter mt-1">Y-axis [dBV]</div>
+                    <input type="number" id="yMinLin" value="-100" step="10" onchange="applyRangeLin()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Min">
+                    <input type="number" id="yMaxLin" value="0" step="10" onchange="applyRangeLin()" class="text-[10px] border border-gray-200 rounded px-1.5 py-1" placeholder="Max">
+                </div>
+            </section>
+
+            <section class="pt-2">
+                <button onclick="resetAllRanges()" class="w-full text-[10px] font-bold border border-slate-300 py-2 rounded bg-white hover:bg-slate-50 transition active:translate-y-px">RESET ALL RANGES</button>
+            </section>
+
+            <!-- Statistics Display -->
+            <section class="flex-1 min-h-0 border-t pt-4">
+                <h2 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Averaged Stats</h2>
+                <div class="space-y-2 font-mono text-[10px]">
+                    <div class="bg-gray-50 p-2 rounded border border-gray-100 shadow-inner">
+                        <p class="text-slate-400 text-[8px] uppercase">Raw Peak (Upper)</p>
+                        <p id="statRawPeak" class="text-blue-700 font-bold truncate">--</p>
+                    </div>
+                    <div class="bg-blue-50 p-2 rounded border border-blue-100 shadow-inner">
+                        <p class="text-blue-400 text-[8px] uppercase">Processed Peak (Lower)</p>
+                        <p id="statFiltPeak" class="text-blue-700 font-bold truncate">--</p>
+                    </div>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 flex flex-col bg-slate-200 p-2 gap-2 overflow-hidden">
+            <!-- Window 1: Raw Log -->
+            <div class="flex-1 bg-white rounded shadow border border-slate-300 relative group">
+                <div class="absolute top-2 left-4 text-[9px] font-bold text-slate-300 pointer-events-none uppercase tracking-wide">Upper Window: Raw Spectrum (Logarithmic)</div>
+                <div class="h-full w-full p-2 pt-6">
+                    <canvas id="chartLog"></canvas>
+                </div>
+            </div>
+
+            <!-- Window 2: Processed Linear -->
+            <div class="flex-1 bg-white rounded shadow border border-slate-300 relative group">
+                <div class="absolute top-2 left-4 text-[9px] font-bold text-slate-300 pointer-events-none uppercase tracking-wide">Lower Window: Processed Analysis (Linear)</div>
+                <div class="h-full w-full p-2 pt-6">
+                    <canvas id="chartLin"></canvas>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let chartLog, chartLin;
+        let rawFilesData = []; 
+        let avgRaw = [], avgFilt = [];
+
+        /**
+         * 垂直ガイドライン描画プラグイン
+         */
+        const harmonicGuidePlugin = {
+            id: 'harmonicGuide',
+            afterDraw: (chart) => {
+                const showGuides = document.getElementById('showGuides').checked;
+                if (!showGuides) return;
+
+                const ctx = chart.ctx;
+                const xAxis = chart.scales.x;
+                const yAxis = chart.scales.y;
+                const baseF = (parseFloat(document.getElementById('baseFreq').value) || 50) / 1000; // kHz
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.setLineDash([5, 5]);
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)'; // Faint Red
+                ctx.lineWidth = 1;
+
+                const xMin = xAxis.min || 0;
+                const xMax = xAxis.max || 1000;
+
+                // 倍波の描画
+                for (let n = 1; n < 1000; n++) {
+                    const freq = n * baseF;
+                    if (freq > xMax) break;
+                    if (freq >= xMin) {
+                        const xPos = xAxis.getPixelForValue(freq);
+                        ctx.moveTo(xPos, yAxis.top);
+                        ctx.lineTo(xPos, yAxis.bottom);
+                    }
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
+        };
+
+        function initCharts() {
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                elements: { line: { tension: 0, borderWidth: 1 }, point: { radius: 0 } },
+                plugins: { 
+                    legend: { 
+                        position: 'top', 
+                        align: 'end', 
+                        labels: { 
+                            boxWidth: 8, 
+                            font: { size: 9 }, 
+                            usePointStyle: true,
+                            filter: (item) => item.text && !item.text.includes('.txt')
+                        } 
+                    },
+                    tooltip: { mode: 'index', intersect: false },
+                    zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, mode: 'x' } }
+                }
+            };
+
+            chartLog = new Chart(document.getElementById('chartLog').getContext('2d'), {
+                type: 'line',
+                data: { datasets: [] },
+                plugins: [harmonicGuidePlugin],
+                options: {
+                    ...commonOptions,
+                    scales: {
+                        x: { 
+                            type: 'logarithmic', title: { display: true, text: 'Frequency [kHz]', font: { size: 10, weight: 'bold' } },
+                            grid: { color: '#f0f0f0' },
+                            ticks: { callback: v => [1, 2, 5].includes(v / Math.pow(10, Math.floor(Math.log10(v)))) ? v : null }
+                        },
+                        y: { title: { display: true, text: 'Amplitude [dBV]', font: { size: 10 } }, min: -100, max: 0, grid: { color: '#f8fafc' } }
+                    }
+                }
+            });
+
+            chartLin = new Chart(document.getElementById('chartLin').getContext('2d'), {
+                type: 'line',
+                data: { datasets: [] },
+                plugins: [harmonicGuidePlugin],
+                options: {
+                    ...commonOptions,
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: 'Frequency [kHz]', font: { size: 10, weight: 'bold' } }, grid: { color: '#f0f0f0' } },
+                        y: { title: { display: true, text: 'Amplitude [dBV]', font: { size: 10 } }, min: -100, max: 0, grid: { color: '#f8fafc' } }
+                    }
+                }
+            });
+        }
+
+        async function handleFiles(files) {
+            document.getElementById('fileStatus').innerText = "Analyzing...";
+            for (let file of files) {
+                const text = await file.text();
+                const points = parsePicoScope(text);
+                if (points.length > 0) rawFilesData.push({ name: file.name, raw: points });
+            }
+            processAll();
+        }
+
+        function parsePicoScope(text) {
+            const pts = [];
+            for (let line of text.split('\n')) {
+                const parts = line.trim().split(/\t+/);
+                if (parts.length >= 2) {
+                    const f = parseFloat(parts[0]), a = parseFloat(parts[1]);
+                    if (!isNaN(f) && !isNaN(a)) pts.push({ x: f, y: a });
+                }
+            }
+            return pts;
+        }
+
+        function interpolateHarmonics(data) {
+            if (!document.getElementById('filterEnabled').checked) return [...data];
+            const baseF = (parseFloat(document.getElementById('baseFreq').value) || 50) / 1000;
+            const bw = (parseFloat(document.getElementById('filterBW').value) || 10) / 1000;
+            const res = data.map(p => ({...p}));
+            let i = 0;
+            while (i < res.length) {
+                const harmonicIdx = Math.round(res[i].x / baseF);
+                if (harmonicIdx > 0 && Math.abs(res[i].x - harmonicIdx * baseF) < (bw / 2)) {
+                    let startIdx = i;
+                    while (startIdx > 0 && Math.abs(res[startIdx].x - harmonicIdx * baseF) < (bw / 2)) startIdx--;
+                    let endIdx = i;
+                    while (endIdx < res.length - 1 && Math.abs(res[endIdx].x - harmonicIdx * baseF) < (bw / 2)) endIdx++;
+                    const startVal = res[startIdx].y, endVal = res[endIdx].y, count = endIdx - startIdx;
+                    for (let j = startIdx + 1; j < endIdx; j++) {
+                        const t = (j - startIdx) / count;
+                        res[j].y = startVal + (endVal - startVal) * t;
+                    }
+                    i = endIdx + 1;
+                } else { i++; }
+            }
+            return res;
+        }
+
+        function processAll() {
+            if (rawFilesData.length === 0) return;
+            rawFilesData.forEach(d => { d.filt = interpolateHarmonics(d.raw); });
+            avgRaw = calculateRMSAverage(rawFilesData.map(d => d.raw));
+            avgFilt = calculateRMSAverage(rawFilesData.map(d => d.filt));
+            updateCharts();
+            renderStats();
+            renderFileList();
+            document.getElementById('fileStatus').innerText = `${rawFilesData.length} Files Active`;
+        }
+
+        function calculateRMSAverage(datasets) {
+            if (datasets.length === 0) return [];
+            const masterX = datasets[0].map(p => p.x);
+            const avg = [];
+            for (let i = 0; i < masterX.length; i++) {
+                let sumPower = 0, count = 0;
+                datasets.forEach(ds => { if (ds[i]) { sumPower += Math.pow(10, ds[i].y / 20); count++; } });
+                if (count > 0) avg.push({ x: masterX[i], y: 20 * Math.log10(sumPower / count) });
+            }
+            return avg;
+        }
+
+        function updateCharts() {
+            const showIndiv = document.getElementById('showIndividual').checked;
+            
+            // Upper Chart
+            chartLog.data.datasets = [{ label: 'RMS Avg (Raw)', data: avgRaw, borderColor: '#ef4444', borderWidth: 1.5, order: 0 }];
+            if (showIndiv) {
+                rawFilesData.forEach((d, i) => {
+                    chartLog.data.datasets.push({ 
+                        label: d.name, data: d.raw, borderColor: `hsla(${(i*40)%360},60%,50%,0.08)`, borderWidth: 0.5, order: 1 
+                    });
+                });
+            }
+            chartLog.update('none');
+
+            // Lower Chart
+            chartLin.data.datasets = [{ label: 'Processed Spectrum', data: avgFilt, borderColor: '#2563eb', borderWidth: 1.5 }];
+            chartLin.update('none');
+        }
+
+        function applyRangeLog() {
+            let xMin = parseFloat(document.getElementById('xMinLog').value);
+            let xMax = parseFloat(document.getElementById('xMaxLog').value);
+            let yMin = parseFloat(document.getElementById('yMinLog').value);
+            let yMax = parseFloat(document.getElementById('yMaxLog').value);
+            chartLog.options.scales.x.min = (!isNaN(xMin) && xMin > 0) ? xMin : 0.001;
+            chartLog.options.scales.x.max = !isNaN(xMax) ? xMax : undefined;
+            chartLog.options.scales.y.min = !isNaN(yMin) ? yMin : undefined;
+            chartLog.options.scales.y.max = !isNaN(yMax) ? yMax : undefined;
+            chartLog.update();
+        }
+
+        function applyRangeLin() {
+            let xMin = parseFloat(document.getElementById('xMinLin').value);
+            let xMax = parseFloat(document.getElementById('xMaxLin').value);
+            let yMin = parseFloat(document.getElementById('yMinLin').value);
+            let yMax = parseFloat(document.getElementById('yMaxLin').value);
+            chartLin.options.scales.x.min = !isNaN(xMin) ? xMin : undefined;
+            chartLin.options.scales.x.max = !isNaN(xMax) ? xMax : undefined;
+            chartLin.options.scales.y.min = !isNaN(yMin) ? yMin : undefined;
+            chartLin.options.scales.y.max = !isNaN(yMax) ? yMax : undefined;
+            chartLin.update();
+        }
+
+        function resetAllRanges() {
+            const defaults = {
+                'xMinLog': '', 'xMaxLog': '', 'yMinLog': '-100', 'yMaxLog': '0',
+                'xMinLin': '', 'xMaxLin': '', 'yMinLin': '-100', 'yMaxLin': '0'
+            };
+            Object.keys(defaults).forEach(id => document.getElementById(id).value = defaults[id]);
+            chartLog.resetZoom(); chartLin.resetZoom();
+            chartLog.options.scales.y.min = -100; chartLog.options.scales.y.max = 0;
+            chartLin.options.scales.y.min = -100; chartLin.options.scales.y.max = 0;
+            chartLog.update(); chartLin.update();
+        }
+
+        function renderStats() {
+            if (avgRaw.length > 0) {
+                const p = avgRaw.reduce((m, p) => p.y > m.y ? p : m, avgRaw[0]);
+                document.getElementById('statRawPeak').innerText = `${p.y.toFixed(2)} dBV @ ${p.x.toFixed(3)} kHz`;
+            }
+            if (avgFilt.length > 0) {
+                const p = avgFilt.reduce((m, p) => p.y > m.y ? p : m, avgFilt[0]);
+                document.getElementById('statFiltPeak').innerText = `${p.y.toFixed(2)} dBV @ ${p.x.toFixed(3)} kHz`;
+            }
+        }
+
+        function renderFileList() {
+            const c = document.getElementById('fileList');
+            c.innerHTML = '';
+            rawFilesData.forEach((d, i) => {
+                const dv = document.createElement('div');
+                dv.className = "flex justify-between items-center p-1 bg-gray-50 border-b border-gray-100";
+                dv.innerHTML = `<span class="truncate w-44 font-medium">${d.name}</span><button onclick="removeData(${i})" class="text-red-400 font-bold px-1 hover:bg-red-50">✕</button>`;
+                c.appendChild(dv);
+            });
+        }
+        function removeData(idx) { rawFilesData.splice(idx, 1); processAll(); }
+
+        fileInput.onchange = (e) => handleFiles(e.target.files);
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); };
+        dropZone.ondragleave = () => dropZone.classList.remove('drag-over');
+        dropZone.ondrop = (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); };
+        window.onload = initCharts;
+    </script>
+</body>
+</html>
