@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PicoScope Spectrum Analysis - Dual Window</title>
+    <title>PicoScope Spectrum Analysis - Academic Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
@@ -149,7 +149,7 @@
         let avgRaw = [], avgFilt = [];
 
         /**
-         * 垂直ガイドライン描画プラグイン
+         * Harmonic Guide Plugin for Chart.js
          */
         const harmonicGuidePlugin = {
             id: 'harmonicGuide',
@@ -160,18 +160,17 @@
                 const ctx = chart.ctx;
                 const xAxis = chart.scales.x;
                 const yAxis = chart.scales.y;
-                const baseF = (parseFloat(document.getElementById('baseFreq').value) || 50) / 1000; // kHz
+                const baseF = (parseFloat(document.getElementById('baseFreq').value) || 50) / 1000; 
 
                 ctx.save();
                 ctx.beginPath();
                 ctx.setLineDash([5, 5]);
-                ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)'; // Faint Red
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)'; 
                 ctx.lineWidth = 1;
 
                 const xMin = xAxis.min || 0;
                 const xMax = xAxis.max || 1000;
 
-                // 倍波の描画
                 for (let n = 1; n < 1000; n++) {
                     const freq = n * baseF;
                     if (freq > xMax) break;
@@ -296,22 +295,33 @@
             document.getElementById('fileStatus').innerText = `${rawFilesData.length} Files Active`;
         }
 
+        /**
+         * RMS Power Average Algorithm
+         * 1. Linearize: P = 10^(dBV/10)
+         * 2. Average: P_avg = mean(P)
+         * 3. Re-dB: L_avg = 10 * log10(P_avg)
+         */
         function calculateRMSAverage(datasets) {
             if (datasets.length === 0) return [];
             const masterX = datasets[0].map(p => p.x);
             const avg = [];
             for (let i = 0; i < masterX.length; i++) {
                 let sumPower = 0, count = 0;
-                datasets.forEach(ds => { if (ds[i]) { sumPower += Math.pow(10, ds[i].y / 20); count++; } });
-                if (count > 0) avg.push({ x: masterX[i], y: 20 * Math.log10(sumPower / count) });
+                datasets.forEach(ds => { 
+                    if (ds[i]) { 
+                        sumPower += Math.pow(10, ds[i].y / 10); 
+                        count++; 
+                    } 
+                });
+                if (count > 0) {
+                    avg.push({ x: masterX[i], y: 10 * Math.log10(sumPower / count) }); 
+                }
             }
             return avg;
         }
 
         function updateCharts() {
             const showIndiv = document.getElementById('showIndividual').checked;
-            
-            // Upper Chart
             chartLog.data.datasets = [{ label: 'RMS Avg (Raw)', data: avgRaw, borderColor: '#ef4444', borderWidth: 1.5, order: 0 }];
             if (showIndiv) {
                 rawFilesData.forEach((d, i) => {
@@ -321,8 +331,6 @@
                 });
             }
             chartLog.update('none');
-
-            // Lower Chart
             chartLin.data.datasets = [{ label: 'Processed Spectrum', data: avgFilt, borderColor: '#2563eb', borderWidth: 1.5 }];
             chartLin.update('none');
         }
